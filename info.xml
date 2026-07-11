@@ -2,7 +2,7 @@
 <extension key="nl.onvergetelijk.gdpr" type="module">
   <file>gdpr</file>
   <name>Onvergetelijk - GDPR</name>
-  <description>AVG/GDPR-dataminimalisatie: wist medische, gedrags- en contactgegevens van oud-deelnemers na afloop van de bewaartermijn (migratie van sqltask 7)</description>
+  <description>AVG/GDPR: dataminimalisatie (sqltask 7), recht op vergetelheid bij Contactvoorkeuren 44 (sqltasks 106/112/113/114/163), opt-out-hygiëne nieuwsbriefgroepen (sqltask 11) en bidirectionele sync tussen PRIVACY.Contactvoorkeuren en core is_opt_out/do_not_email. Elke mutatie wordt vastgelegd in een activity (type 142).</description>
   <license>AGPL-3.0</license>
   <maintainer>
     <author>Richard van Oosterhout</author>
@@ -15,12 +15,12 @@
     <url desc="Licensing">https://www.gnu.org/licenses/agpl-3.0.html</url>
   </urls>
   <releaseDate>2026-07-11</releaseDate>
-  <version>1.0.0</version>
+  <version>1.1.0</version>
   <develStage>alpha</develStage>
   <compatibility>
     <ver>6.16</ver>
   </compatibility>
-  <comments>Onderdeel van de Onvergetelijk-extensie-suite voor Stichting Onvergetelijke Zomerkampen. Migreert de GDPR-opschoonlogica uit sqltask 7 naar een versiebeheerde, testbare extensie. Compatibel met CiviCRM 6.16, PHP 8.4 en Smarty 5.</comments>
+  <comments>Onderdeel van de Onvergetelijk-extensie-suite voor Stichting Onvergetelijke Zomerkampen. Bundelt de GDPR-logica uit de losse sqltasks (7/11/106/112/113/114/163) in een versiebeheerde, geteste extensie: API-acties Gdpr.cleanup/removerequest/optoutgroepen/syncbackfill (alle met dry_run), privacy-sync-hooks met re-entrancy-guard, en een audit-activity per mutatie. Managed jobs staan default uit; activeren per onderdeel pas na het uitzetten van de bijbehorende bron-sqltask. Compatibel met CiviCRM 6.16, PHP 8.4 en Smarty 5.</comments>
   <requires>
     <ext>nl.onvergetelijk.base</ext>
   </requires>
