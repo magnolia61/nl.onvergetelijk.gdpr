@@ -94,6 +94,24 @@ return [
         ],
     ],
     [
+        'name'    => 'Cron_Gdpr_ParticipantOptin',
+        'entity'  => 'Job',
+        'update'  => 'unmodified',
+        'cleanup' => 'always',
+        'params'  => [
+            'version'       => 4,
+            'values'        => [
+                'name'          => 'Onvergetelijk - GDPR Participant Optin',
+                'description'   => 'Consent-override bij kampdeelname: do_not_email uit (maar is_opt_out AAN, bulk blijft dicht) en e-mail-on-hold weg voor deelnemers/leiding in het lopende kampwindow, zodat praktische kampmail aankomt. Migratie+correctie van sqltasks 97/108 (108 wiste ook is_opt_out) - activeer pas NADAT die zijn uitgezet.',
+                'run_frequency' => 'Daily',
+                'api_entity'    => 'Gdpr',
+                'api_action'    => 'participantoptin',
+                'parameters'    => "dry_run=0",
+                'is_active'     => FALSE,
+            ],
+        ],
+    ],
+    [
         // Bevestigingsmail bij een verwijderverzoek TIJDENS het kampseizoen (voorkeur 44
         // mét actieve registratie): bulk stopt direct, praktische kampmail blijft, de
         // gegevens worden na het seizoen verwijderd. CONCEPT-tekst — door Richard te

@@ -6,6 +6,7 @@ require_once 'gdpr.civix.php';
 require_once 'gdpr.helpers.php';
 require_once 'gdpr.logic.removerequest.php';
 require_once 'gdpr.logic.optout.php';
+require_once 'gdpr.logic.optin.php';
 require_once 'gdpr.logic.privacy.php';
 
 use CRM_Gdpr_ExtensionUtil as E;
