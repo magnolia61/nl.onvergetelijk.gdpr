@@ -120,7 +120,8 @@ return [
                     . 'Daar hoef je verder niets voor te doen.</p>'
                     . '<p>Heb je vragen, of wil je tóch dat we alles per direct verwijderen? '
                     . 'Mail ons gerust op info@onvergetelijk.nl.</p>'
-                    . '<p>Hartelijke groet,<br/>Stichting Onvergetelijke Zomerkampen</p>',
+                    . '<div class="ozk-groet">Hartelijke groet,<br/>Stichting Onvergetelijke Zomerkampen'
+                    . '<br/><div class="site-logo">{site.smarty_logo}</div></div>',
                 'msg_text'     => '',
                 'is_active'    => TRUE,
                 'is_reserved'  => FALSE,
