@@ -199,14 +199,39 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
   // ########################################################################
 
   /**
+   * Is de gdpr-extensie enabled (hooks live)?
+   */
+  private function extensieEnabled(): bool {
+    $result_ext_get = civicrm_api4('Extension', 'get', [
+      'checkPermissions' => FALSE,
+      'select'           => ['status'],
+      'where'            => [
+        ['key', '=', 'nl.onvergetelijk.gdpr'],
+      ],
+      'limit'            => 1,
+    ]);
+
+    return ($result_ext_get->first()['status'] ?? '') === 'installed';
+  }
+
+  /**
    * Native opt-out 0->1 vult voorkeur 33, tenzij er al 33/44 staat.
+   *
+   * Effect-gedreven: met de extensie ENABLED vuurt de échte pre/post-hookketen op de
+   * Contact.update en toetsen we alleen het eindresultaat. Alleen bij een disabled
+   * extensie simuleren we de hooks handmatig (zelfde pad als vóór de livegang).
    */
   public function testCoreOptoutNaarCustomVoorkeur33() {
     $cid = $this->maakContact(0, 0);
     $this->zetPrivacyVoorkeur($cid, 11);
 
-    $params = ['is_opt_out' => 1];
-    gdpr_sync_remember_contact_before_core_update('edit', 'Individual', $cid, $params, 'gdpr.test');
+    $enabled = $this->extensieEnabled();
+
+    if (!$enabled) {
+      // Handmatige pre-hook-simulatie (extensie uit: geen live hooks).
+      $params = ['is_opt_out' => 1];
+      gdpr_sync_remember_contact_before_core_update('edit', 'Individual', $cid, $params, 'gdpr.test');
+    }
 
     civicrm_api4('Contact', 'update', [
       'checkPermissions' => FALSE,
@@ -218,11 +243,14 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
       ],
     ]);
 
-    $objectRef = ['id' => $cid, 'is_opt_out' => 1];
-    $result    = gdpr_sync_core_to_custom_from_contact_post('edit', 'Individual', $cid, $objectRef, 'gdpr.test');
-    $flags     = $this->leesCoreFlags($cid);
+    if (!$enabled) {
+      // Handmatige post-hook-simulatie.
+      $objectRef = ['id' => $cid, 'is_opt_out' => 1];
+      gdpr_sync_core_to_custom_from_contact_post('edit', 'Individual', $cid, $objectRef, 'gdpr.test');
+    }
 
-    $this->assertSame(1, $result['rows'], 'Core 0->1 moet een custom voorkeur schrijven.');
+    $flags = $this->leesCoreFlags($cid);
+
     $this->assertSame(33, $this->leesPrivacyVoorkeur($cid), 'Core opt-out moet voorkeur 33 zetten.');
     $this->assertSame(1, $flags['is_opt_out'], 'Core opt-out moet is_opt_out=1 houden.');
     $this->assertSame(0, $flags['do_not_email'], 'Voorkeur 33 moet do_not_email=0 afdwingen.');
