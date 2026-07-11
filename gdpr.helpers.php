@@ -71,21 +71,22 @@ function _gdpr_count_sql_from_select(string $select_sql): string {
 }
 
 /**
- * Vervang {tokens} in een activity-subject door waarden uit de kandidaat-rij.
+ * Vervang {tokens} in een activity-template (subject of details) door waarden uit de
+ * kandidaat-rij. Zelfde token-mechanisme als de CreateActivity-actie van de bron-sqltasks.
  *
- * @param string $template Subject-template met tokens.
+ * @param string $template Template met {kolomnaam}-tokens.
  * @param array  $row      Kandidaat-rij.
  *
- * @return string Subject met ingevulde waarden.
+ * @return string Tekst met ingevulde waarden.
  */
-function _gdpr_render_activity_subject(string $template, array $row): string {
-    $subject = $template;
+function _gdpr_render_activity_template(string $template, array $row): string {
+    $tekst = $template;
     foreach ($row as $key => $value) {
         if (is_scalar($value) || $value === NULL) {
-            $subject = str_replace('{' . $key . '}', (string) $value, $subject);
+            $tekst = str_replace('{' . $key . '}', (string) $value, $tekst);
         }
     }
-    return $subject;
+    return $tekst;
 }
 
 /**
@@ -111,19 +112,25 @@ function _gdpr_activity_location_from_row(array $row): ?string {
 /**
  * Maak de GDPR-cleanup activity die de bron-sqltasks als auditspoor achterlieten.
  *
+ * Elke privacy-mutatie krijgt een activity type 142 (Cleanup data) met subject ÉN
+ * details, net als de CreateActivity-acties van de bron-sqltasks. Type 142 staat in
+ * de beschermde-types-lijst van de dataminimalisatie (stap 2.1), dus het auditspoor
+ * wordt zelf nooit opgeruimd.
+ *
  * @param array       $row              Kandidaat-rij.
- * @param string      $subject_template Subject-template met tokens uit de rij.
+ * @param string      $subject_template Subject-template met {tokens} uit de rij.
+ * @param string      $details_template Details-template met {tokens} uit de rij ('' = geen details).
  * @param int         $activity_type_id Activity type (142 = Cleanup data).
  * @param int|string  $extdebug         Wachthond-kanaal.
  */
-function _gdpr_create_cleanup_activity(array $row, string $subject_template, int $activity_type_id, $extdebug): void {
+function _gdpr_create_cleanup_activity(array $row, string $subject_template, string $details_template, int $activity_type_id, $extdebug): void {
     $target_contact_id = (int) ($row['contact_id'] ?? $row['gdpr_contact_id'] ?? 0);
     if ($target_contact_id <= 0) {
         wachthond($extdebug, 3, "[SKIP] geen target_contact_id voor cleanup-activity", $row);
         return;
     }
 
-    $subject = _gdpr_render_activity_subject($subject_template, $row);
+    $subject = _gdpr_render_activity_template($subject_template, $row);
     $values  = [
         'activity_type_id'   => $activity_type_id,
         'subject'            => $subject,
@@ -133,6 +140,10 @@ function _gdpr_create_cleanup_activity(array $row, string $subject_template, int
         'source_contact_id'  => (int) ($row['gdpr_contact_id'] ?? $target_contact_id),
         'target_contact_id'  => [$target_contact_id],
     ];
+
+    if ($details_template !== '') {
+        $values['details'] = _gdpr_render_activity_template($details_template, $row);
+    }
 
     $location = _gdpr_activity_location_from_row($row);
     if ($location !== NULL) {
@@ -157,6 +168,7 @@ function _gdpr_create_cleanup_activity(array $row, string $subject_template, int
  * @param string      $select_sql           SELECT die kandidaat-rijen oplevert.
  * @param callable    $mutate_row           Mutatie-callback: function(array $row, $extdebug): bool.
  * @param string      $activity_subject_tpl Subject-template met {tokens} uit de rij.
+ * @param string      $activity_details_tpl Details-template met {tokens} uit de rij (bron-sqltask-tekst).
  * @param int         $activity_type_id     Activity type (142 = Cleanup data).
  * @param int|string  $extdebug             Wachthond-kanaal.
  *
@@ -168,6 +180,7 @@ function _gdpr_exec_removerequest(
     string $select_sql,
     callable $mutate_row,
     string $activity_subject_tpl,
+    string $activity_details_tpl,
     int $activity_type_id,
     $extdebug
 ): array {
@@ -199,7 +212,7 @@ function _gdpr_exec_removerequest(
             continue;
         }
 
-        _gdpr_create_cleanup_activity($row, $activity_subject_tpl, $activity_type_id, $extdebug);
+        _gdpr_create_cleanup_activity($row, $activity_subject_tpl, $activity_details_tpl, $activity_type_id, $extdebug);
         $rows++;
     }
 

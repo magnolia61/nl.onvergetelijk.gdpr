@@ -61,12 +61,15 @@ WHERE C.is_opt_out = 1
   AND GR.visibility = 'Public Pages'
   AND E.is_primary = 1";
 
+    // Activity-details: VERBATIM uit de CreateActivity-actie van bron-sqltask 11.
     $stappen   = [];
     $stappen[] = _gdpr_exec_removerequest($dry_run,
         'OG.1 opt-out-contact uit publieke nieuwsbriefgroep verwijderen',
         $optout_groepen_sql,
         '_gdpr_optout_groepen_groupcontact_removed',
         'GDPR Optout uit {group_title}',
+        "Omdat {display_name} een optout uitschrijfverzoek heeft gegeven verwijderen we deze persoon uit {group_title}. "
+        . "Andere contacten met hetzelfde emailadres ({email}) blijven onveranderd.",
         142,
         $extdebug);
 

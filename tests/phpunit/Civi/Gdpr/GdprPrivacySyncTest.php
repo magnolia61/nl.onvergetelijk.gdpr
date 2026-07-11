@@ -94,12 +94,32 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
     ];
   }
 
+  /**
+   * Tel GDPR-cleanup-activities (type 142) voor een contact met een subject-prefix.
+   */
+  private function telActivity(int $contactId, string $subjectPrefix): int {
+    // COUNT(DISTINCT ...): het contact is source én target van dezelfde activity
+    // (2 activity_contact-rijen), we willen unieke activities tellen.
+    return (int) \CRM_Core_DAO::singleValueQuery(
+      "SELECT COUNT(DISTINCT A.id)
+       FROM civicrm_activity A
+       INNER JOIN civicrm_activity_contact AC ON AC.activity_id = A.id
+       WHERE A.activity_type_id = 142
+         AND A.subject LIKE %2
+         AND AC.contact_id = %1",
+      [
+        1 => [$contactId, 'Integer'],
+        2 => [$subjectPrefix . '%', 'String'],
+      ]
+    );
+  }
+
   // ########################################################################
   // ### SCENARIO: CUSTOM -> CORE
   // ########################################################################
 
   /**
-   * Voorkeur 44 zet core is_opt_out=1 en do_not_email=1.
+   * Voorkeur 44 zet core is_opt_out=1 en do_not_email=1, mét auditspoor-activity.
    */
   public function testVoorkeur44ZetCoreFlags() {
     $cid = $this->maakContact(0, 0);
@@ -111,6 +131,8 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
     $this->assertSame(1, $result['rows'], 'Eerste sync moet core-vlaggen wijzigen.');
     $this->assertSame(1, $flags['is_opt_out'], 'Voorkeur 44 moet is_opt_out=1 zetten.');
     $this->assertSame(1, $flags['do_not_email'], 'Voorkeur 44 moet do_not_email=1 zetten.');
+    $this->assertSame(1, $this->telActivity($cid, 'GDPR voorkeur-sync'),
+      'Elke sync-mutatie moet een activity 142 vastleggen.');
   }
 
   /**
@@ -159,10 +181,12 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
     $this->assertSame(33, $this->leesPrivacyVoorkeur($cid), 'Core opt-out moet voorkeur 33 zetten.');
     $this->assertSame(1, $flags['is_opt_out'], 'Core opt-out moet is_opt_out=1 houden.');
     $this->assertSame(0, $flags['do_not_email'], 'Voorkeur 33 moet do_not_email=0 afdwingen.');
+    $this->assertSame(1, $this->telActivity($cid, 'GDPR opt-out overgenomen'),
+      'De voorkeur-overname moet een activity 142 vastleggen.');
   }
 
   /**
-   * Een tweede custom->core sync is idempotent en muteert niets extra.
+   * Een tweede custom->core sync is idempotent: geen extra mutatie én geen extra activity.
    */
   public function testCustomSyncIsIdempotent() {
     $cid = $this->maakContact(0, 0);
@@ -174,5 +198,7 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
     $this->assertSame(1, $eerste['rows'], 'Eerste sync moet core-vlaggen wijzigen.');
     $this->assertSame(0, $tweede['rows'], 'Tweede sync mag niets extra muteren.');
     $this->assertFalse(_gdpr_sync_is_busy($cid), 'Re-entrancy guard moet na sync vrijgegeven zijn.');
+    $this->assertSame(1, $this->telActivity($cid, 'GDPR voorkeur-sync'),
+      'Een idempotente tweede sync mag géén extra activity aanmaken.');
   }
 }

@@ -173,7 +173,7 @@ class GdprRemoveRequestTest extends \PHPUnit\Framework\TestCase implements EndTo
     }
 
     return (int) \CRM_Core_DAO::singleValueQuery(
-      "SELECT COUNT(*)
+      "SELECT COUNT(DISTINCT A.id)
        FROM civicrm_activity A
        INNER JOIN civicrm_activity_contact AC ON AC.activity_id = A.id
        WHERE A.activity_type_id = 142
@@ -208,6 +208,22 @@ class GdprRemoveRequestTest extends \PHPUnit\Framework\TestCase implements EndTo
     $this->assertGreaterThanOrEqual(1,
       $this->telActivity($cid, 'GDPR emailadres verwijderd ivm verzoek (1)', $email),
       'E-maildelete moet een activity 142 met het verwijderde adres in location maken.');
+
+    // De details moeten gerenderd zijn (bron-sqltask-tekst mét ingevulde tokens).
+    $details = (string) \CRM_Core_DAO::singleValueQuery(
+      "SELECT A.details
+       FROM civicrm_activity A
+       INNER JOIN civicrm_activity_contact AC ON AC.activity_id = A.id
+       WHERE A.activity_type_id = 142 AND AC.contact_id = %1 AND A.location = %2
+       ORDER BY A.id DESC LIMIT 1",
+      [1 => [$cid, 'Integer'], 2 => [$email, 'String']]
+    );
+    $this->assertStringContainsString($email, $details,
+      'Activity-details moeten het verwijderde e-mailadres bevatten.');
+    $this->assertStringContainsString('verwijderverzoek', $details,
+      'Activity-details moeten de bron-sqltask-uitleg bevatten.');
+    $this->assertStringNotContainsString('{gdpr_', $details,
+      'Alle {tokens} in de details moeten gerenderd zijn.');
   }
 
   /**

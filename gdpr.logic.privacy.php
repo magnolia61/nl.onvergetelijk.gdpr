@@ -214,6 +214,24 @@ function gdpr_sync_custom_to_core(int $contact_id, $extdebug = 'gdpr.sync'): arr
         _gdpr_sync_set_busy($contact_id, FALSE);
     }
 
+    // AUDITSPOOR: elke privacy-mutatie krijgt een activity 142, net als bij de
+    // bron-sqltasks. We beschrijven de oude en nieuwe vlagwaarden expliciet zodat
+    // een jaar later nog te herleiden is wat de sync gedaan heeft en waarom.
+    $wijzigingen = [];
+    foreach ($values as $field => $nieuw) {
+        $wijzigingen[] = "$field: {$current[$field]} -> $nieuw";
+    }
+    _gdpr_create_cleanup_activity(
+        ['contact_id' => $contact_id],
+        'GDPR voorkeur-sync: core privacy-vlaggen bijgewerkt',
+        "Contactvoorkeuren (PRIVACY-tab) staat op '$voorkeur'; de core privacy-vlaggen zijn "
+        . "daarop aangepast: " . implode(', ', $wijzigingen) . ". "
+        . "Mapping: 11/22 = mailings toegestaan, 33 = geen bulk-mailings (is_opt_out), "
+        . "44 = verwijderverzoek (is_opt_out + do_not_email).",
+        142,
+        $extdebug
+    );
+
     return ['contact_id' => $contact_id, 'rows' => 1, 'skipped' => NULL, 'values' => $values];
 }
 
@@ -301,6 +319,21 @@ function gdpr_sync_core_to_custom_from_contact_post($op, $object_name, $object_i
     }
 
     _gdpr_sync_write_contactvoorkeuren($contact_id, 33, $extdebug);
+
+    // AUDITSPOOR: leg vast dat een native opt-out (bv. CiviMail-unsubscribe of een
+    // vinkje op het contactscherm) is doorvertaald naar de PRIVACY-tab. De eventuele
+    // core-vlag-correctie hieronder legt zichzelf apart vast via gdpr_sync_custom_to_core.
+    _gdpr_create_cleanup_activity(
+        ['contact_id' => $contact_id],
+        'GDPR opt-out overgenomen als Contactvoorkeuren 33',
+        "Dit contact heeft zich via een CiviCRM opt-out afgemeld voor bulk-mailings "
+        . "(is_opt_out 0 -> 1, bv. een unsubscribe-link of het privacy-vinkje). "
+        . "De voorkeur op de PRIVACY-tab was nog niet 33/44 en is bijgewerkt naar "
+        . "33 (Geen mailings), zodat beide administraties hetzelfde zeggen.",
+        142,
+        $extdebug
+    );
+
     $sync = gdpr_sync_custom_to_core($contact_id, $extdebug);
 
     return [

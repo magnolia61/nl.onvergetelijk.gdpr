@@ -194,12 +194,16 @@ INNER JOIN `civicrm_value_ditjaar_199` D ON D.entity_id = C.id
 WHERE G.contactvoorkeuren_1417 = 44
   AND D.ditjaar_event_start_1155 IS NULL";
 
+    // Activity-details: VERBATIM overgenomen uit de CreateActivity-acties van de
+    // bron-sqltasks, zodat het auditspoor identiek blijft aan wat de organisatie kent.
     $stappen   = [];
     $stappen[] = _gdpr_exec_removerequest($dry_run,
         'RR.1 e-mail direct verwijderen (voorkeur 44)',
         $email_direct_sql,
         '_gdpr_removerequest_email_delete',
         'GDPR emailadres verwijderd ivm verzoek ({location_type_id})',
+        "{gdpr_contact_name} ({contact_id}) heeft op {gdpr_datum} een verwijderverzoek gedaan voor het emailadres: {gdpr_email} (location type: {location_type_id}). "
+        . "Indien dit emailadres ook door andere contacten in gebruik was hebben we dit emailadres bij hen 'on hold' gezet en bij {gdpr_contact_name} verwijderd.",
         142,
         $extdebug);
 
@@ -208,6 +212,9 @@ WHERE G.contactvoorkeuren_1417 = 44
         $email_related_sql,
         '_gdpr_removerequest_email_on_hold',
         'GDPR emailadres on-hold ivm verzoek {gdpr_contact_name}',
+        "{gdpr_contact_name} ({gdpr_contact_id}) heeft op {gdpr_datum} een verwijderverzoek gedaan voor het emailadres: {related_email}.\n\n"
+        . "Omdat {related_display_name} (contact_id: {contact_id}) hetzelfde emailadres heeft (met location_type: {related_location_type_id}) hebben we dit emailadres voorlopig 'on hold' gezet. "
+        . "Het emailadres bij {gdpr_contact_name} is verwijderd.",
         142,
         $extdebug);
 
@@ -216,6 +223,8 @@ WHERE G.contactvoorkeuren_1417 = 44
         $phone_related_sql,
         '_gdpr_removerequest_phone_related_delete',
         'GDPR telefoon verwijderd ivm verzoek {gdpr_contact_name}',
+        "{gdpr_contact_name} ({gdpr_contact_id}) heeft op {gdpr_datum} een verwijderverzoek gedaan voor het telefoonnummer: {gdpr_phone} (location_type: {location_verzoeker})\n\n"
+        . "Omdat {related_contact_name} hetzelfde telefoonnummer secundair heeft (location_type: {location_related}) verwijderen we het nummer ook voor {related_contact_name}.",
         142,
         $extdebug);
 
@@ -224,6 +233,8 @@ WHERE G.contactvoorkeuren_1417 = 44
         $phone_direct_sql,
         '_gdpr_removerequest_phone_direct_delete',
         'GDPR telefoon verwijderd ivm verzoek',
+        "{gdpr_contact_name} ({contact_id}) heeft op {gdpr_datum} een verwijderverzoek gedaan voor het telefoonnummer: {gdpr_phone} (location_type: {phone_location}). "
+        . "Indien dit telefoonnummer ook door andere contacten in gebruik was hebben we dit telefoonnummer bij hen ook verwijderd tenzij het was bij iemand die dit jaar meegaat of het location_type: home was.",
         142,
         $extdebug);
 
@@ -231,7 +242,8 @@ WHERE G.contactvoorkeuren_1417 = 44
         'RR.4 adres direct verwijderen (voorkeur 44)',
         $adres_direct_sql,
         '_gdpr_removerequest_address_delete',
-        'GDPR adres verwijderd ivm verzoek',
+        'GDPR adres verwijderd ivm verzoek (id: {gdpr_adres_id})',
+        "{display_name} ({contact_id}) heeft op {gdpr_datum} een verwijderverzoek gedaan voor het adres: {gdpr_adres} {gdpr_city} (location type: {adres_locatie}).",
         142,
         $extdebug);
 
