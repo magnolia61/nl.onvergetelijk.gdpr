@@ -75,6 +75,18 @@ class GdprRemoveRequestTest extends \PHPUnit\Framework\TestCase implements EndTo
   }
 
   /**
+   * Simuleer een actieve kampregistratie voor dit jaar (ditjaar_event_start gevuld).
+   */
+  private function zetDitjaarActief(int $cid): void {
+    \CRM_Core_DAO::executeQuery(
+      "INSERT INTO `civicrm_value_ditjaar_199` (entity_id, ditjaar_event_start_1155)
+       VALUES (%1, NOW())
+       ON DUPLICATE KEY UPDATE ditjaar_event_start_1155 = NOW()",
+      [1 => [$cid, 'Integer']]
+    );
+  }
+
+  /**
    * Maak een e-mailadres aan.
    */
   private function maakEmail(int $cid, string $email, int $locationType = 1, int $onHold = 0): int {
@@ -248,6 +260,26 @@ class GdprRemoveRequestTest extends \PHPUnit\Framework\TestCase implements EndTo
       'Directe e-mail van de verzoeker moet verwijderd zijn.');
     $this->assertSame(2, $this->leesEmailOnHold($relatedEmailId),
       'Gerelateerde e-mail moet on-hold=2 krijgen.');
+  }
+
+  /**
+   * BELEIDSREGEL: een verzoeker mét actieve kampregistratie voor dit jaar wordt
+   * overgeslagen — contactgegevens blijven staan tot na het seizoen.
+   */
+  public function testActieveRegistratieBeschermtTegenErasure() {
+    $cid   = $this->maakContact('RemoveActief');
+    $email = 'gdpr-actief-' . uniqid() . '@example.invalid';
+    $this->zetPrivacyVoorkeur($cid, 44);
+    $this->zetDitjaarActief($cid);
+    $emailId = $this->maakEmail($cid, $email, 1);
+    $phoneId = $this->maakTelefoon($cid, '06124' . random_int(10000, 99999), 1);
+
+    gdpr_removerequest_run(FALSE, 'gdpr.test');
+
+    $this->assertTrue($this->emailBestaat($emailId),
+      'E-mail van een verzoeker met actieve registratie moet blijven staan.');
+    $this->assertTrue($this->telefoonBestaat($phoneId),
+      'Telefoon van een verzoeker met actieve registratie moet blijven staan.');
   }
 
   /**

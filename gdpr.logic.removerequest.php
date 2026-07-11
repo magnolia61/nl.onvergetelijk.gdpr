@@ -121,6 +121,11 @@ function gdpr_removerequest_run(bool $dry_run = FALSE, $extdebug = 'gdpr.remover
     wachthond($extdebug, 2, "########################################################################");
 
     // RR.1 E-mail direct verwijderen (task 106, temp_gdpr_removerequest_email_direct).
+    // BELEIDSREGEL (Richard, 11-jul-2026, aanscherping t.o.v. bron-sqltask 106): een
+    // verzoeker MET actieve kampregistratie voor dit jaar wordt overgeslagen — de
+    // praktische kampmail moet kunnen blijven aankomen. LEFT JOIN: een contact zónder
+    // DITJAAR-rij heeft geen registratie en wordt dus wél verwerkt. Na het seizoen
+    // (ditjaar_event_start weer leeg) pakt de nachtelijke run het verzoek alsnog op.
     $email_direct_sql = "SELECT C.id AS contact_id, C.display_name AS gdpr_contact_name,
        E.id AS gdpr_email_id, E.email AS gdpr_email, E.location_type_id, E.is_primary, E.on_hold,
        G.contactvoorkeuren_1417 AS contactvoorkeuren,
@@ -128,7 +133,9 @@ function gdpr_removerequest_run(bool $dry_run = FALSE, $extdebug = 'gdpr.remover
 FROM `civicrm_contact` C
 INNER JOIN `civicrm_email` E ON E.contact_id = C.id
 INNER JOIN `civicrm_value_privacy_286` G ON G.entity_id = C.id
-WHERE G.contactvoorkeuren_1417 = 44";
+LEFT JOIN `civicrm_value_ditjaar_199` DJ ON DJ.entity_id = C.id
+WHERE G.contactvoorkeuren_1417 = 44
+  AND DJ.ditjaar_event_start_1155 IS NULL";
 
     // RR.2 Direct-view uit task 163: activity-gedreven lookup op eerder verwijderde e-mail.
     $email_activity_direct_sql = "SELECT C.id contact_id, C.display_name AS gdpr_contact_name, E.id AS gdpr_email_id,
@@ -158,13 +165,16 @@ WHERE E.on_hold = 0
   AND V.contact_id != E.contact_id";
 
     // RR.3 Directe telefoon-view (task 112, temp_gdpr_removerequest_phone_direct).
+    // Zelfde beleidsregel als RR.1: verzoeker met actieve kampregistratie overslaan.
     $phone_direct_sql = "SELECT C.id AS contact_id, C.display_name AS gdpr_contact_name, T.id AS gdpr_phone_id, T.phone AS gdpr_phone,
        T.location_type_id AS phone_location, T.is_primary, G.contactvoorkeuren_1417,
        G.datum_update_gdpr_1418 AS gdpr_datum, G.opmerkingen_gdpr_1419 AS gdpr_opmerkingen
 FROM `civicrm_contact` C
 INNER JOIN `civicrm_phone` T ON T.contact_id = C.id
 INNER JOIN `civicrm_value_privacy_286` G ON G.entity_id = C.id
-WHERE G.contactvoorkeuren_1417 = 44";
+LEFT JOIN `civicrm_value_ditjaar_199` DJ ON DJ.entity_id = C.id
+WHERE G.contactvoorkeuren_1417 = 44
+  AND DJ.ditjaar_event_start_1155 IS NULL";
 
     // RR.3 Related telefoon-view (task 113, temp_gdpr_removerequest_phone_related).
     $phone_related_sql = "SELECT V.contact_id AS gdpr_contact_id, V.gdpr_contact_name, V.gdpr_datum, C.id AS contact_id,
@@ -184,6 +194,9 @@ WHERE G.contactvoorkeuren_1417 != '44'
   AND T.location_type_id IN (11,12)";
 
     // RR.4 Adres direct verwijderen (task 114, temp_gdpr_removerequest_adres_direct).
+    // Had als enige direct-stap de registratie-guard al in de bron. LET OP: de bron
+    // gebruikt een INNER JOIN op DITJAAR — een contact zónder DITJAAR-rij wordt daardoor
+    // óók overgeslagen (conservatiever dan RR.1/RR.3). Bewust zo gelaten (bron-pariteit).
     $adres_direct_sql = "SELECT C.id AS contact_id, C.display_name, A.id AS gdpr_adres_id, A.street_address AS gdpr_adres,
        A.city AS gdpr_city, A.location_type_id AS adres_locatie, G.contactvoorkeuren_1417,
        G.datum_update_gdpr_1418 AS gdpr_datum, G.opmerkingen_gdpr_1419 AS gdpr_opmerkingen

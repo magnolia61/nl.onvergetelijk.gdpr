@@ -61,11 +61,43 @@ function _gdpr_sync_set_busy(int $contact_id, bool $busy): void {
 }
 
 /**
+ * Heeft dit contact een actieve kampregistratie voor dit jaar?
+ *
+ * DITJAAR.ditjaar_event_start (custom veld 1155) wordt door de nachtsync gevuld zodra
+ * er een lopende registratie is en geleegd na afloop van het seizoen. Zolang dit veld
+ * gevuld is, is de deelnemer/leiding "onderweg naar kamp" en moeten praktische mails
+ * (bevestigingen, betaalinfo, kampinformatie) kunnen blijven aankomen.
+ */
+function _gdpr_sync_heeft_actieve_registratie(int $contact_id, $extdebug = 'gdpr.sync'): bool {
+    $params_contact_ditjaar = [
+        'checkPermissions' => FALSE,
+        'select'           => ['DITJAAR.ditjaar_event_start'],
+        'where'            => [
+            ['id', '=', $contact_id],
+        ],
+        'limit'            => 1,
+    ];
+    wachthond($extdebug, 7, 'params_contact_ditjaar', $params_contact_ditjaar);
+    $result_contact_ditjaar = civicrm_api4('Contact', 'get', $params_contact_ditjaar);
+    wachthond($extdebug, 9, 'result_contact_ditjaar', $result_contact_ditjaar);
+
+    return !empty($result_contact_ditjaar->first()['DITJAAR.ditjaar_event_start']);
+}
+
+/**
  * Leid de core-vlaggen af uit Privacy.contactvoorkeuren_1417.
+ *
+ * BELEIDSREGEL (Richard, 11-jul-2026): bij voorkeur 44 mét een actieve kampregistratie
+ * voor dit jaar wordt do_not_email UITGESTELD — die vlag zou óók alle praktische
+ * kampmail blokkeren (reminders en CiviRules-mail toetsen do_not_email). We sluiten
+ * dan alleen de bulk-mailings af (is_opt_out). Zodra het seizoen voorbij is en
+ * ditjaar_event_start weer leeg, rondt de dagelijkse reconciliatie (Gdpr.syncbackfill)
+ * de 44-behandeling alsnog af: do_not_email aan en de erasure-job verwijdert de
+ * contactgegevens.
  *
  * @return array|null NULL betekent: leeg/onbekend, dus ongemoeid laten.
  */
-function _gdpr_sync_flags_for_voorkeur(?int $voorkeur): ?array {
+function _gdpr_sync_flags_for_voorkeur(?int $voorkeur, bool $actieve_registratie = FALSE): ?array {
     switch ($voorkeur) {
         case 11:
         case 22:
@@ -75,7 +107,9 @@ function _gdpr_sync_flags_for_voorkeur(?int $voorkeur): ?array {
             return ['is_opt_out' => 1, 'do_not_email' => 0];
 
         case 44:
-            return ['is_opt_out' => 1, 'do_not_email' => 1];
+            return $actieve_registratie
+                ? ['is_opt_out' => 1]                       // uitstel: praktische mail moet blijven aankomen
+                : ['is_opt_out' => 1, 'do_not_email' => 1]; // volledige afsluiting
     }
 
     return NULL;
@@ -175,17 +209,86 @@ function _gdpr_sync_update_contact_flags(int $contact_id, array $values, $extdeb
 }
 
 /**
+ * Stuur de bevestigingsmail bij een uitgesteld verwijderverzoek (voorkeur 44 mét
+ * actieve kampregistratie): nieuwsbrieven/mailings stoppen per direct, praktische
+ * mails over de kampdeelname blijven komen, gegevens worden na het seizoen verwijderd.
+ *
+ * Template wordt op naam opgezocht (managed entity in gdpr.mgd.php), zodat het
+ * template-id per omgeving mag verschillen. In de PHPUnit-omgeving wordt nooit
+ * echt verstuurd.
+ *
+ * @return array{status:string,template_id?:int}
+ */
+function _gdpr_stuur_uitstel_bevestiging(int $contact_id, $extdebug): array {
+
+    // TEST-SCHAKELAAR: de PHPUnit-tests zetten deze static in setUp zodat er nooit
+    // echt gemaild wordt vanuit een testrun. Omgevingsdetectie (CIVICRM_UF) is bij
+    // EndToEnd-tests onbetrouwbaar: de site-bootstrap herdefinieert zowel de constante
+    // als de environment-variabele naar 'Drupal'.
+    if (!empty(\Civi::$statics['gdpr']['mail_onderdrukt'])) {
+        wachthond($extdebug, 3, "[SKIP] uitstel-bevestigingsmail onderdrukt (test-schakelaar)", $contact_id);
+        return ['status' => 'onderdrukt_test'];
+    }
+
+    // Template-id opzoeken op titel (aangemaakt als managed entity).
+    $params_template_get = [
+        'checkPermissions' => FALSE,
+        'select'           => ['id'],
+        'where'            => [
+            ['msg_title', '=', 'GDPR - Verwijderverzoek tijdens kampseizoen'],
+            ['is_active', '=', TRUE],
+        ],
+        'limit'            => 1,
+    ];
+    wachthond($extdebug, 7, 'params_template_get', $params_template_get);
+    $result_template_get = civicrm_api4('MessageTemplate', 'get', $params_template_get);
+    wachthond($extdebug, 9, 'result_template_get', $result_template_get);
+
+    $template_id = (int) ($result_template_get->first()['id'] ?? 0);
+    if ($template_id <= 0) {
+        wachthond($extdebug, 1, "[FOUT] template 'GDPR - Verwijderverzoek tijdens kampseizoen' niet gevonden", "[MAIL]");
+        return ['status' => 'template_niet_gevonden'];
+    }
+
+    // Versturen via emailapi (zelfde kanaal als de CiviRules-mails). GEEN
+    // location_type_id meesturen (bekende emailapi-valkuil: die overschrijft
+    // de adreskeuze voor álle ontvangers).
+    $params_email_send = [
+        'contact_id'  => $contact_id,
+        'template_id' => $template_id,
+    ];
+    wachthond($extdebug, 7, 'params_email_send', $params_email_send);
+    $result_email_send = civicrm_api3('Email', 'send', $params_email_send);
+    wachthond($extdebug, 9, 'result_email_send', $result_email_send);
+
+    return ['status' => 'verstuurd', 'template_id' => $template_id];
+}
+
+/**
  * D.1 Custom -> core: leid core-vlaggen af uit de custom voorkeur.
+ *
+ * @param int         $contact_id Contact waarvoor de voorkeur gesynct wordt.
+ * @param int|string  $extdebug   Wachthond-kanaal.
+ * @param bool        $stuur_mail FALSE = geen bevestigingsmail (bulk/backfill-context:
+ *                                de inhaalslag mag nooit onverwacht massa-mailen).
  *
  * @return array{contact_id:int,rows:int,skipped:?string,values:array}
  */
-function gdpr_sync_custom_to_core(int $contact_id, $extdebug = 'gdpr.sync'): array {
+function gdpr_sync_custom_to_core(int $contact_id, $extdebug = 'gdpr.sync', bool $stuur_mail = TRUE): array {
     if (_gdpr_sync_is_busy($contact_id)) {
         return ['contact_id' => $contact_id, 'rows' => 0, 'skipped' => 'busy', 'values' => []];
     }
 
     $voorkeur = _gdpr_sync_read_contactvoorkeuren($contact_id, $extdebug);
-    $flags    = _gdpr_sync_flags_for_voorkeur($voorkeur);
+
+    // Bij voorkeur 44 bepaalt een actieve kampregistratie of we do_not_email uitstellen
+    // (zie de beleidsregel bij _gdpr_sync_flags_for_voorkeur). Alleen dáár opvragen —
+    // voor 11/22/33 is de registratiestatus niet relevant.
+    $actieve_registratie = ($voorkeur === 44)
+        ? _gdpr_sync_heeft_actieve_registratie($contact_id, $extdebug)
+        : FALSE;
+
+    $flags = _gdpr_sync_flags_for_voorkeur($voorkeur, $actieve_registratie);
     if ($flags === NULL) {
         return ['contact_id' => $contact_id, 'rows' => 0, 'skipped' => 'geen relevante voorkeur', 'values' => []];
     }
@@ -221,18 +324,33 @@ function gdpr_sync_custom_to_core(int $contact_id, $extdebug = 'gdpr.sync'): arr
     foreach ($values as $field => $nieuw) {
         $wijzigingen[] = "$field: {$current[$field]} -> $nieuw";
     }
+    $uitstel_uitleg = ($voorkeur === 44 && $actieve_registratie)
+        ? " LET OP: dit contact heeft een actieve kampregistratie voor dit jaar; do_not_email en het"
+          . " verwijderen van contactgegevens zijn UITGESTELD tot na het seizoen, zodat praktische"
+          . " mails over de kampdeelname blijven aankomen. De dagelijkse reconciliatie rondt dit"
+          . " daarna automatisch af."
+        : "";
     _gdpr_create_cleanup_activity(
         ['contact_id' => $contact_id],
         'GDPR voorkeur-sync: core privacy-vlaggen bijgewerkt',
         "Contactvoorkeuren (PRIVACY-tab) staat op '$voorkeur'; de core privacy-vlaggen zijn "
         . "daarop aangepast: " . implode(', ', $wijzigingen) . ". "
         . "Mapping: 11/22 = mailings toegestaan, 33 = geen bulk-mailings (is_opt_out), "
-        . "44 = verwijderverzoek (is_opt_out + do_not_email).",
+        . "44 = verwijderverzoek (is_opt_out + do_not_email)." . $uitstel_uitleg,
         142,
         $extdebug
     );
 
-    return ['contact_id' => $contact_id, 'rows' => 1, 'skipped' => NULL, 'values' => $values];
+    // BEVESTIGINGSMAIL bij uitgesteld verwijderverzoek: leg de deelnemer/ouder uit dat
+    // nieuwsbrieven en mailings per direct stoppen, maar dat praktische mails over de
+    // kampdeelname gewoon blijven komen. Eénmalig: alleen op het moment dat de vlaggen
+    // daadwerkelijk wijzigen (een tweede submit belandt hierboven al in 'geen wijziging').
+    $mail = NULL;
+    if ($stuur_mail && $voorkeur === 44 && $actieve_registratie) {
+        $mail = _gdpr_stuur_uitstel_bevestiging($contact_id, $extdebug);
+    }
+
+    return ['contact_id' => $contact_id, 'rows' => 1, 'skipped' => NULL, 'values' => $values, 'mail' => $mail];
 }
 
 /**
@@ -384,7 +502,9 @@ WHERE G.contactvoorkeuren_1417 IN (33,44)
         $rows  = 0;
         foreach ($rijen as $row) {
             wachthond($extdebug, 3, "[RUN] backfill kandidaat", $row);
-            $result = gdpr_sync_custom_to_core((int) $row['contact_id'], $extdebug);
+            // stuur_mail=FALSE: de reconciliatie corrigeert stilletjes; alleen een échte
+            // voorkeur-wijziging via de hook mag de bevestigingsmail triggeren.
+            $result = gdpr_sync_custom_to_core((int) $row['contact_id'], $extdebug, FALSE);
             if (!empty($result['rows'])) {
                 $rows++;
             }

@@ -23,6 +23,14 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
     if (!function_exists('gdpr_sync_custom_to_core')) {
       $this->markTestSkipped('gdpr_sync_custom_to_core() niet beschikbaar.');
     }
+
+    // Nooit echt mailen vanuit een testrun (zie _gdpr_stuur_uitstel_bevestiging).
+    \Civi::$statics['gdpr']['mail_onderdrukt'] = TRUE;
+  }
+
+  public function tearDown(): void {
+    unset(\Civi::$statics['gdpr']['mail_onderdrukt']);
+    parent::tearDown();
   }
 
   /**
@@ -133,6 +141,43 @@ class GdprPrivacySyncTest extends \PHPUnit\Framework\TestCase implements EndToEn
     $this->assertSame(1, $flags['do_not_email'], 'Voorkeur 44 moet do_not_email=1 zetten.');
     $this->assertSame(1, $this->telActivity($cid, 'GDPR voorkeur-sync'),
       'Elke sync-mutatie moet een activity 142 vastleggen.');
+  }
+
+  /**
+   * BELEIDSREGEL: voorkeur 44 mét actieve kampregistratie stelt do_not_email uit
+   * (alleen is_opt_out), en triggert de bevestigingsmail (in testomgeving: skip-status).
+   */
+  public function testVoorkeur44MetActieveRegistratieSteltDoNotEmailUit() {
+    $cid = $this->maakContact(0, 0);
+    $this->zetPrivacyVoorkeur($cid, 44);
+    \CRM_Core_DAO::executeQuery(
+      "INSERT INTO `civicrm_value_ditjaar_199` (entity_id, ditjaar_event_start_1155)
+       VALUES (%1, NOW())
+       ON DUPLICATE KEY UPDATE ditjaar_event_start_1155 = NOW()",
+      [1 => [$cid, 'Integer']]
+    );
+
+    $result = gdpr_sync_custom_to_core($cid, 'gdpr.test');
+    $flags  = $this->leesCoreFlags($cid);
+
+    $this->assertSame(1, $flags['is_opt_out'], 'Bulk moet direct dicht (is_opt_out=1).');
+    $this->assertSame(0, $flags['do_not_email'],
+      'do_not_email moet UITGESTELD worden zolang er een actieve registratie is.');
+    $this->assertSame('onderdrukt_test', $result['mail']['status'] ?? NULL,
+      'De bevestigingsmail moet getriggerd worden (en in de testomgeving worden overgeslagen).');
+    $this->assertSame(1, $this->telActivity($cid, 'GDPR voorkeur-sync'),
+      'Ook het uitstel-scenario moet een activity 142 vastleggen.');
+
+    // Backfill-context mag de mail nooit triggeren: eerst vlag terugdraaien zodat er
+    // opnieuw iets te syncen valt, dan syncen met stuur_mail=FALSE.
+    civicrm_api4('Contact', 'update', [
+      'checkPermissions' => FALSE,
+      'where'            => [['id', '=', $cid]],
+      'values'           => ['is_opt_out' => 0],
+    ]);
+    $stil = gdpr_sync_custom_to_core($cid, 'gdpr.test', FALSE);
+    $this->assertSame(1, $stil['rows'], 'Reconciliatie moet de vlag opnieuw zetten.');
+    $this->assertNull($stil['mail'], 'Reconciliatie (stuur_mail=FALSE) mag geen mail triggeren.');
   }
 
   /**
